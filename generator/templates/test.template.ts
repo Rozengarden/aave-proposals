@@ -1,22 +1,7 @@
-import { createPublicClient, http } from "viem";
-import {
-  arbitrum,
-  avalanche,
-  mainnet,
-  metis,
-  optimism,
-  polygon,
-} from "viem/chains";
-import { getAlias } from "../common.js";
-
-const CHAIN_TO_EXECUTOR = {
-  Ethereum: "AaveGovernanceV2.SHORT_EXECUTOR",
-  Polygon: "AaveGovernanceV2.POLYGON_BRIDGE_EXECUTOR",
-  Optimism: "AaveGovernanceV2.OPTIMISM_BRIDGE_EXECUTOR",
-  Arbitrum: "AaveGovernanceV2.ARBITRUM_BRIDGE_EXECUTOR",
-  Metis: "AaveGovernanceV2.METIS_BRIDGE_EXECUTOR",
-  Avalanche: "0xa35b76E4935449E33C56aB24b23fcd3246f13470 // avalanche guardian",
-};
+import {createPublicClient, http} from 'viem';
+import {arbitrum, avalanche, mainnet, metis, optimism, polygon, base} from 'viem/chains';
+import {CHAIN_TO_EXECUTOR, generateContractName, getAlias} from '../common';
+import {Options} from '../types';
 
 const CHAIN_TO_CHAIN_OBJECT = {
   Ethereum: mainnet,
@@ -25,6 +10,7 @@ const CHAIN_TO_CHAIN_OBJECT = {
   Arbitrum: arbitrum,
   Avalanche: avalanche,
   Metis: metis,
+  Base: base,
 };
 
 export const getBlock = async (chain) => {
@@ -34,15 +20,16 @@ export const getBlock = async (chain) => {
   }).getBlockNumber();
 };
 
-export const testTemplate = async ({
-  protocolVersion,
-  chain,
-  title,
-  author,
-  snapshot,
-  discussion,
-  contractName,
-}) => `// SPDX-License-Identifier: MIT
+export const testTemplate = async (options: Options, chain, artifacts) => {
+  const {protocolVersion, title, author, snapshot, discussion, features} = options;
+  const contractName = generateContractName(options, chain);
+
+  const functions = artifacts
+    .map((artifact) => artifact[chain].test?.fn)
+    .flat()
+    .filter((f) => f !== undefined)
+    .join('\n');
+  let template = `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
 import 'forge-std/Test.sol';
@@ -57,15 +44,14 @@ import {${contractName}} from './${contractName}.sol';
  * command: make test-contract filter=${contractName}
  */
 contract ${contractName}_Test is Protocol${protocolVersion}TestBase {
+  ${contractName} internal proposal;
+
   function setUp() public {
-    vm.createSelectFork(vm.rpcUrl('${getAlias(chain)}'), ${await getBlock(
-  chain
-)});
+    vm.createSelectFork(vm.rpcUrl('${getAlias(chain)}'), ${await getBlock(chain)});
+    proposal = new ${contractName}();
   }
 
   function testProposalExecution() public {
-    ${contractName} proposal = new ${contractName}();
-
     ReserveConfig[] memory allConfigsBefore = createConfigurationSnapshot(
       'pre${contractName}',
       Aave${protocolVersion}${chain}.POOL
@@ -84,4 +70,8 @@ contract ${contractName}_Test is Protocol${protocolVersion}TestBase {
 
     diffReports('pre${contractName}', 'post${contractName}');
   }
+
+  ${functions}
 }`;
+  return template;
+};
